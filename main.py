@@ -33,7 +33,7 @@ def run_strategy():
     now = datetime.now(jst)
     
     # ゴトー日判定
-    if not is_gotobi(now): return
+    #if not is_gotobi(now): return
 
     price, bb_upper, bb_lower = get_technicals()
     if not price: return
