@@ -1,33 +1,31 @@
-import os
-import requests
-from datetime import datetime, timedelta, timezone
-import yfinance as yf
+name: Gotobi Alert System
 
-# 手順1でコピーしたURLをGitHubのSecret(名前: GAS_URL)に入れるか、ここに直接貼る
-GAS_URL = os.getenv("https://script.google.com/macros/s/AKfycbyKC_4zsHQukBfyJVAR0vBV38uW2C043X0cAeW4fJnJTt3bIdNyrT-zDfbfm-MgXvUTvg/exec") 
+on:
+  schedule:
+    # 毎日 日本時間 朝08:00 (UTC 23:00)
+    - cron: '0 23 * * *'
+  workflow_dispatch: # 手動実行ボタン
 
-def run_strategy():
-    jst = timezone(timedelta(hours=9))
-    now = datetime.now(jst)
-    
-    if now.day % 5 != 0: return
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    ticker = yf.Ticker("USDJPY=X")
-    price = ticker.history(period="1d")['Close'].iloc[-1]
-    
-    # スプレッドシートに送るデータ
-    data = {
-        "date": now.strftime("%Y/%m/%d"),
-        "strategy": "ゴトー日ロング",
-        "price": round(price, 3)
-    }
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-    # GASに送信！
-    try:
-        response = requests.post(GAS_URL, json=data)
-        print(f"GAS Response: {response.text}")
-    except Exception as e:
-        print(f"Error: {e}")
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-if __name__ == "__main__":
-    run_strategy()
+      - name: Run script
+        env:
+          # ここに「金庫(Secrets)」の合言葉をすべて並べます
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GAS_URL: ${{ secrets.GAS_URL }}
+        run: python main.py
