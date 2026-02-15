@@ -3,71 +3,67 @@ import requests
 from datetime import datetime, timedelta, timezone
 import yfinance as yf
 
-def send_to_discord(embed):
-    url = os.getenv("DISCORD_WEBHOOK_URL")
-    if not url: return
-    payload = {"embeds": [embed]}
-    requests.post(url, json=payload)
+# 【最重要】GitHubの金庫からURLを受け取る設定
+GAS_URL = os.getenv("GAS_URL")
+DISCORD_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-def check_economic_indicators(now):
-    """
-    重要指標の有無を判定する（簡易版）
-    本来はAPIを使用しますが、ここでは特定の日付や曜日の注意を促します
-    """
-    warnings = []
-    # 例：五十日でも「月曜日」は週明けの窓開けリスクがあるなど
-    if now.weekday() == 0:
-        warnings.append("⚠️ 週明け月曜のため、窓開けや不安定な動きに注意")
+def send_to_discord(price, indicator_msg):
+    """Discordに豪華なカードを送る"""
+    if not DISCORD_URL: return
     
-    # 金曜日かつ五十日の「金曜ゴトー」は最も上昇しやすい傾向
-    if now.weekday() == 4:
-        warnings.append("✨ 金曜ゴトー日！実需の買いが強まりやすい絶好機")
+    now = datetime.now(timezone(timedelta(hours=9)))
+    embed = {
+        "title": "🚀 【実需】ゴトー日・仲値トレード",
+        "description": f"本日 {now.month}/{now.day} の戦略データです。",
+        "color": 3066993,
+        "fields": [
+            {"name": "📈 戦略", "value": "09:00 **ロング** ➔ 09:50 **全決済**"},
+            {"name": "📊 現在価格", "value": f"**{price:.3f} 円**", "inline": True},
+            {"name": "🚩 指標", "value": indicator_msg, "inline": False}
+        ]
+    }
+    requests.post(DISCORD_URL, json={"embeds": [embed]})
+
+def log_to_sheets(price):
+    """スプレッドシート(GAS)に記録を送る"""
+    if not GAS_URL:
+        print("エラー: GAS_URLが設定されていません")
+        return
         
-    return "\n".join(warnings) if warnings else "特になし（通常通り）"
+    now = datetime.now(timezone(timedelta(hours=9)))
+    data = {
+        "date": now.strftime("%Y/%m/%d"),
+        "strategy": "ゴトー日ロング",
+        "price": round(price, 3)
+    }
+    
+    try:
+        res = requests.post(GAS_URL, json=data)
+        print(f"GAS記録結果: {res.text}")
+    except Exception as e:
+        print(f"GAS送信失敗: {e}")
 
 def run_strategy():
     jst = timezone(timedelta(hours=9))
     now = datetime.now(jst)
     
-    # 五十日判定
-    #if now.day % 5 != 0: return
+    # テストのために判定を一時的にコメントアウトしたい場合は、下の行の先頭に # を入れてください
+    if now.day % 5 != 0: 
+        print(f"今日は{now.day}日のため、実行をスキップしました。")
+        return
 
-    ticker = yf.Ticker("USDJPY=X")
-    df = ticker.history(period="2d")
-    price = df['Close'].iloc[-1]
+    # ドル円レート取得
+    try:
+        ticker = yf.Ticker("USDJPY=X")
+        price = ticker.history(period="1d")['Close'].iloc[-1]
+    except:
+        price = 0
+
+    # 1. Discordに送る
+    send_to_discord(price, "通常通り")
     
-    indicator_msg = check_economic_indicators(now)
-    
-    embed = {
-        "title": "🚀 【実需】ゴトー日・仲値トレード発動",
-        "description": f"本日 **{now.month}/{now.day}** の戦略データです。",
-        "color": 15158332 if "⚠️" in indicator_msg else 3066993, # 警告時は赤、通常は緑
-        "fields": [
-            {
-                "name": "📈 戦略",
-                "value": "09:00 **ロング** ➔ 09:50 **全決済**",
-                "inline": False
-            },
-            {
-                "name": "🚩 指標・注意点",
-                "value": indicator_msg,
-                "inline": False
-            },
-            {
-                "name": "📊 現在価格",
-                "value": f"**{price:.3f} 円**",
-                "inline": True
-            },
-            {
-                "name": "💡 期待値",
-                "value": "勝率 83.3%",
-                "inline": True
-            }
-        ],
-        "footer": {"text": "FX Strategy Bot | 規律あるトレードを"},
-        "timestamp": now.isoformat()
-    }
-    send_to_discord(embed)
+    # 2. スプレッドシートに記録する
+    log_to_sheets(price)
 
 if __name__ == "__main__":
     run_strategy()
