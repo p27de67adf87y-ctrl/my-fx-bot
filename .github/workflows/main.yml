@@ -1,0 +1,22 @@
+name: Gotobi Alert
+on:
+  schedule:
+    # 日本時間の朝 08:00 (UTC 23:00)
+    - cron: '0 23 * * *'
+  workflow_dispatch: # 手動実行ボタンを作ります
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run script
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python main.py
