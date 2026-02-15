@@ -1,31 +1,24 @@
-name: Gotobi Alert System
+name: Gotobi Bot System
 
 on:
   schedule:
-    # 毎日 日本時間 朝08:00 (UTC 23:00)
-    - cron: '0 23 * * *'
+    - cron: '0 23 * * *' # 日本時間 08:00
   workflow_dispatch: # 手動実行ボタン
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
+      - uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
+        run: pip install -r requirements.txt
       - name: Run script
         env:
-          # ここに「金庫(Secrets)」の合言葉をすべて並べます
+          # ここで「金庫(Secrets)」の値を Python に引き渡しています
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           GAS_URL: ${{ secrets.GAS_URL }}
         run: python main.py
