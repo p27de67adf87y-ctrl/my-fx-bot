@@ -30,7 +30,7 @@ def run_strategy():
     now = datetime.now(jst)
     
     # 五十日判定
-    if now.day % 5 != 0: return
+    #if now.day % 5 != 0: return
 
     ticker = yf.Ticker("USDJPY=X")
     df = ticker.history(period="2d")
