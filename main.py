@@ -4,7 +4,7 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta, timezone
 
-FORCE_TEST_MODE = False # テストが終わったらFalseにしてください
+FORCE_TEST_MODE = true # テストが終わったらFalseにしてください
 
 def get_demand_insight(dt):
     """
