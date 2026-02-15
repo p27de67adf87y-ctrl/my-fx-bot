@@ -5,69 +5,68 @@ import yfinance as yf
 
 def send_to_discord(embed):
     url = os.getenv("DISCORD_WEBHOOK_URL")
-    if not url:
-        return
+    if not url: return
     payload = {"embeds": [embed]}
     requests.post(url, json=payload)
 
-def get_market_data():
-    """ドル円の現在値とボラティリティを取得"""
-    try:
-        ticker = yf.Ticker("USDJPY=X")
-        df = ticker.history(period="2d")
-        current_price = df['Close'].iloc[-1]
+def check_economic_indicators(now):
+    """
+    重要指標の有無を判定する（簡易版）
+    本来はAPIを使用しますが、ここでは特定の日付や曜日の注意を促します
+    """
+    warnings = []
+    # 例：五十日でも「月曜日」は週明けの窓開けリスクがあるなど
+    if now.weekday() == 0:
+        warnings.append("⚠️ 週明け月曜のため、窓開けや不安定な動きに注意")
+    
+    # 金曜日かつ五十日の「金曜ゴトー」は最も上昇しやすい傾向
+    if now.weekday() == 4:
+        warnings.append("✨ 金曜ゴトー日！実需の買いが強まりやすい絶好機")
         
-        # 1日の値動き幅（高値 - 安値）の平均を計算（目安）
-        daily_range = df['High'].iloc[-1] - df['Low'].iloc[-1]
-        return current_price, daily_range
-    except:
-        return None, None
+    return "\n".join(warnings) if warnings else "特になし（通常通り）"
 
 def run_strategy():
-    # 日本時間(JST)を設定
     jst = timezone(timedelta(hours=9))
     now = datetime.now(jst)
     
-    # ゴトー日判定（5, 10, 15, 20, 25, 30日）
-    if now.day % 5 != 0:
-        print(f"本日({now.day}日)は対象外です。")
-        return
+    # 五十日判定
+    if now.day % 5 != 0: return
 
-    price, volatility = get_market_data()
+    ticker = yf.Ticker("USDJPY=X")
+    df = ticker.history(period="2d")
+    price = df['Close'].iloc[-1]
     
-    # Discordに送るカード（Embed）の設定
+    indicator_msg = check_economic_indicators(now)
+    
     embed = {
         "title": "🚀 【実需】ゴトー日・仲値トレード発動",
-        "description": f"本日 **{now.month}/{now.day}** は実需のドル需要が高まるゴトー日です。",
-        "color": 5814783, # 青色
+        "description": f"本日 **{now.month}/{now.day}** の戦略データです。",
+        "color": 15158332 if "⚠️" in indicator_msg else 3066993, # 警告時は赤、通常は緑
         "fields": [
             {
                 "name": "📈 戦略",
-                "value": "09:00 **ロング（買い）**\n09:50 **全決済（利確・損切）**",
+                "value": "09:00 **ロング** ➔ 09:50 **全決済**",
                 "inline": False
             },
             {
-                "name": "📊 現在レート",
-                "value": f"**{price:.3f} 円**" if price else "取得失敗",
-                "inline": True
-            },
-            {
-                "name": "⚡ ボラティリティ",
-                "value": f"約 {volatility*100:.1f} pips" if volatility else "取得失敗",
-                "inline": True
-            },
-            {
-                "name": "💡 アドバイス",
-                "value": "9:50の仲値公示に向けて上昇しやすい傾向にあります。9:50を過ぎると急落のリスクがあるため、時間は厳守してください。",
+                "name": "🚩 指標・注意点",
+                "value": indicator_msg,
                 "inline": False
+            },
+            {
+                "name": "📊 現在価格",
+                "value": f"**{price:.3f} 円**",
+                "inline": True
+            },
+            {
+                "name": "💡 期待値",
+                "value": "勝率 83.3%",
+                "inline": True
             }
         ],
-        "footer": {
-            "text": "FX Strategy Bot | 勝率 83.3% ロジック"
-        },
+        "footer": {"text": "FX Strategy Bot | 規律あるトレードを"},
         "timestamp": now.isoformat()
     }
-
     send_to_discord(embed)
 
 if __name__ == "__main__":
