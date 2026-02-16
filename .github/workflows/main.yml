@@ -2,23 +2,32 @@ name: Gotobi Bot System
 
 on:
   schedule:
-    - cron: '0 23 * * *' # 日本時間 08:00
-  workflow_dispatch: # 手動実行ボタン
+    # 30分おきに自動実行 (GitHubのサーバー状況により数分遅れることがあります)
+    - cron: '*/30 * * * *'
+  # 手動でいつでも実行できるボタンを有効化
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas yfinance
+
       - name: Run script
         env:
-          # ここで「金庫(Secrets)」の値を Python に引き渡しています
+          # GitHubのSettings > Secrets に登録した名前と一致させる必要があります
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           GAS_URL: ${{ secrets.GAS_URL }}
         run: python main.py
