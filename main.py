@@ -4,7 +4,7 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta, timezone
 
-FORCE_TEST_MODE = True 
+FORCE_TEST_MODE = False 
 
 def get_demand_insight(dt):
     """小林社長のインサイトに基づく需給判定 [cite: 11]"""
