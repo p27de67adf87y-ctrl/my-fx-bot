@@ -4,7 +4,7 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta, timezone
 
-FORCE_TEST_MODE = False
+FORCE_TEST_MODE = True
 
 def get_demand_insight(dt):
     day, weekday = dt.day, dt.weekday()
