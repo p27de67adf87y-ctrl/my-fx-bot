@@ -4,35 +4,27 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta, timezone
 
-# ==========================================
-# 設定エリア
-FORCE_TEST_MODE = False  # テスト時のみ True にする
-# ==========================================
+FORCE_TEST_MODE = False
 
 def get_demand_insight(dt):
-    """小林社長のインサイトに基づく需給判定 [cite: 11, 35]"""
     day, weekday = dt.day, dt.weekday()
-    # マンデー・ルール判定
     if weekday == 0:
         sun, sat = dt - timedelta(days=1), dt - timedelta(days=2)
         if sun.day % 5 == 0 or sat.day % 5 == 0:
-            return "🔥【特強気】週末分が凝縮された爆発的需要（マンデー・ルール適用日）" [cite: 35]
-    
-    if day == 5: return "🐂【強気】輸入企業のドル買い需要が突出する日" [cite: 11]
-    if day == 30: return "🐻【警戒】輸出企業の決済（ドル売り）が強まる日" [cite: 11]
-    return "⚖️【中立】通常のゴトー日実需（ドル買い優勢 70%）" [cite: 11]
+            return "🔥【特強気】週末分が凝縮された爆発的需要（マンデー・ルール適用日）"
+    if day == 5: return "🐂【強気】輸入企業のドル買い需要が突出する日"
+    if day == 30: return "🐻【警戒】輸出企業の決済（ドル売り）が強まる日"
+    return "⚖️【中立】通常のゴト日実需（ドル買い優勢 70%）"
 
 def is_gotobi(dt):
-    """ゴトー日判定（マンデー・ルール対応） [cite: 9, 35]"""
     day, weekday = dt.day, dt.weekday()
     if day % 5 == 0 and weekday < 5: return True
-    if weekday == 0: # 月曜日の振替判定
+    if weekday == 0:
         sun, sat = dt - timedelta(days=1), dt - timedelta(days=2)
         if sun.day % 5 == 0 or sat.day % 5 == 0: return True
     return False
 
 def get_technicals():
-    """ボリンジャーバンド計算 [cite: 27]"""
     try:
         df = yf.Ticker("USDJPY=X").history(period="1d", interval="5m")
         if len(df) < 20: return None, None, None
@@ -49,43 +41,30 @@ def run_strategy():
     now = datetime.now(jst)
     current_time = now.strftime("%H:%M")
     price, bb_upper, bb_lower = get_technicals()
-    
     if price is None: return
-
     insight = get_demand_insight(now)
     msg, status = "", "待機中"
 
-    # --- 1. 生存確認通知（毎日 08:00 〜 08:30 の間に1回実行） ---
-    # トレードがない日でも、この時間にシステムが動けば通知を送ります
     if "08:00" <= current_time <= "08:30":
-        msg = f"🌅 【生存確認】監視システム稼働中\n判定: {'ゴトー日' if is_gotobi(now) else '通常日'}\n状況: {insight}\n現在値: {price:.3f}円"
+        msg = f"🌅 【生存確認】システム稼働中\n判定: {'ゴト日' if is_gotobi(now) else '通常日'}\n状況: {insight}\n現在値: {price:.3f}円"
         status = "システム点検"
-
-    # --- 2. トレード判定（ゴトー日のみ） ---
     elif FORCE_TEST_MODE:
         msg, status = f"{insight}\n🧪 接続テスト中", "テスト成功"
-    
     elif is_gotobi(now):
-        # フェーズ1: 07:00台 ポジショニング [cite: 19]
         if "07:00" <= current_time < "08:00":
             if price <= bb_lower:
-                msg = f"{insight}\n🚩【ポジショニング】押し目買い好機 (BB -2σ)" [cite: 19, 27]
+                msg = f"{insight}\n🚩【ポジショニング】押し目買い好機 (BB -2σ)"
                 status = "押し目買い"
-        
-        # フェーズ2: 09:00台 加速・追随 [cite: 20]
         elif "09:00" <= current_time < "09:50":
             if price >= bb_upper:
-                msg = f"{insight}\n⚠️【警戒】オーバーシュートにつき飛び乗り禁止" [cite: 27]
+                msg = f"{insight}\n⚠️【警戒】オーバーシュートにつき飛び乗り禁止"
                 status = "追随回避"
             else:
-                msg = f"{insight}\n📈【加速フェーズ】仲値へ向けたドル買いモメンタム" [cite: 20]
+                msg = f"{insight}\n📈【加速フェーズ】仲値へ向けたドル買いモメンタム"
                 status = "ロング追随"
-        
-        # フェーズ3: 09:50 決済 [cite: 21, 23]
         elif "09:50" <= current_time <= "10:10":
-            msg = "🚨【全決済】リバーストレード回避（9:55公示前の撤退）" [cite: 21, 23]
+            msg = "🚨【全決済】リバーストレード回避（9:55公示前の撤退）"
             status = "ポジション解消"
-
     if msg: send_data(price, msg, status)
 
 def send_data(price, msg, status):
