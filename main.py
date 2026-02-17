@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # 設定エリア
-FORCE_TEST_MODE = True  # テスト時のみ True にする
+FORCE_TEST_MODE = True  # ← これを True にして保存すれば、今すぐ届きます！
 # ==========================================
 
 def get_kobayashi_sentiment():
@@ -19,10 +19,10 @@ def get_kobayashi_sentiment():
         res.raise_for_status()
         
         soup = BeautifulSoup(res.text, 'html.parser')
-        # 最新の記事リストから文言を抽出
+        # 最新の記事リストを取得
         latest_post = soup.select_one('.market_shot_list li')
         if not latest_post:
-            raise ValueError("サイト構造が変更された可能性があります（記事が見つかりません）。")
+            raise ValueError("記事リストが見つかりません。")
             
         text = latest_post.text
         if "買い" in text or "押し目" in text:
@@ -32,23 +32,19 @@ def get_kobayashi_sentiment():
         return 1.0, "⚖️【社長インサイト】中立：様子見"
         
     except Exception as e:
-        # スクレイピング失敗時のアラート用メッセージ
-        error_alert = f"🚨【要メンテナンス】小林社長のインサイト取得に失敗\n理由: {str(e)}"
-        return None, error_alert
+        return None, f"🚨【要メンテナンス】インサイト取得失敗\n理由: {str(e)}"
 
 def get_demand_insight(dt):
-    """日付ベースの需給判定（マンデー・ルール対応）"""
     day, weekday = dt.day, dt.weekday()
     if weekday == 0:
         sun, sat = dt - timedelta(days=1), dt - timedelta(days=2)
         if sun.day % 5 == 0 or sat.day % 5 == 0:
-            return "🔥【特強気】週末分が凝縮された需要（マンデー・ルール）"
-    if day == 5: return "🐂【強気】輸入企業のドル買い需要突出"
-    if day == 30: return "🐻【警戒】輸出企業のドル売り強まる"
+            return "🔥【特強気】週末分が凝縮（マンデー・ルール）"
+    if day == 5: return "🐂【強気】輸入企業ドル買い突出"
+    if day == 30: return "🐻【警戒】輸出企業ドル売り強まる"
     return "⚖️【中立】通常のゴト日実需"
 
 def is_gotobi(dt):
-    """ゴトー日判定ロジック"""
     day, weekday = dt.day, dt.weekday()
     if day % 5 == 0 and weekday < 5: return True
     if weekday == 0:
@@ -57,7 +53,6 @@ def is_gotobi(dt):
     return False
 
 def get_technicals():
-    """ボリンジャーバンド計算"""
     try:
         df = yf.Ticker("USDJPY=X").history(period="1d", interval="5m")
         if len(df) < 20: return None, None, None
@@ -74,60 +69,39 @@ def run_strategy():
     now = datetime.now(jst)
     current_time = now.strftime("%H:%M")
     
-    # 1. ゴトー日以外は即終了（通常日は沈黙）
+    # テストモード以外で通常日の場合は終了
     if not is_gotobi(now) and not FORCE_TEST_MODE:
         return 
 
     price, bb_upper, bb_lower = get_technicals()
     if price is None: return
 
-    # 小林社長のセンチメントを取得
     sentiment_score, sentiment_msg = get_kobayashi_sentiment()
-    
-    # スクレイピング失敗時は警告を飛ばし、中立(1.0)として続行
-    is_maintenance = False
-    if sentiment_score is None:
-        is_maintenance = True
-        sentiment_score = 1.0
-
     demand_insight = get_demand_insight(now)
     msg, status = "", ""
 
-    # 2. ゴトー日のタイムライン判定
-    
-    # 朝の総括 (08:00 - 08:30)
-    if "08:00" <= current_time <= "08:30":
+    # --- 配信ロジック ---
+
+    # テストモード時は最優先で配信メッセージを作成
+    if FORCE_TEST_MODE:
+        msg = f"🧪【テスト配信】現在の判定状況\n需給: {demand_insight}\n{sentiment_msg}\n現在値: {price:.3f}円\nBB(-2σ): {bb_lower:.3f}"
+        status = "テスト実行"
+
+    # 通常のゴトー日タイムライン（FORCE_TEST_MODEがFalseの時に機能）
+    elif "08:00" <= current_time <= "08:30":
         msg = f"📅 【ゴト日監視レポート】\n需給: {demand_insight}\n{sentiment_msg}\n現在値: {price:.3f}円"
         status = "監視開始"
-
-    # フェーズ1: ポジショニング (07:00台)
     elif "07:00" <= current_time < "08:00":
-        # 社長が強気ならエントリー条件を少し緩和
-        threshold = bb_lower * (1.0005 if sentiment_score > 1.0 else 1.0)
+        threshold = bb_lower * (1.0005 if (sentiment_score or 1.0) > 1.0 else 1.0)
         if price <= threshold:
-            msg = f"{demand_insight}\n{sentiment_msg}\n🚩【条件合致】押し目買い実行"
+            msg = f"🚩【条件合致】押し目買い実行\n{sentiment_msg}"
             status = "ロング実行"
         else:
-            msg = f"{demand_insight}\n{sentiment_msg}\n⚖️【待機】価格が高いため見送り"
-            status = "条件不一致"
-
-    # フェーズ2: 加速・追随 (09:00 - 09:50)
-    elif "09:00" <= current_time < "09:50":
-        if price >= bb_upper:
-            msg = f"⚠️【警戒】高値圏のため追随禁止\n{sentiment_msg}"
-            status = "追随回避"
-        else:
-            msg = f"📈【加速】仲値公示へ向けた買いモメンタム\n{sentiment_msg}"
-            status = "ロング追随"
-
-    # フェーズ3: 決済 (09:50 - 10:10)
+            msg = f"⚖️【待機】条件不一致\n{sentiment_msg}"
+            status = "見送り"
     elif "09:50" <= current_time <= "10:10":
-        msg = "🚨【全決済】規律に従いポジションを解消します（9:55公示直前の撤退）"
+        msg = "🚨【全決済】9:55公示直前の撤退規律"
         status = "ポジション解消"
-
-    # スクレイピング失敗時はメッセージの先頭に警告を追加
-    if is_maintenance and msg:
-        msg = "⚠️【スクレイピング失敗中】\n" + msg
 
     if msg: send_data(price, msg, status)
 
@@ -135,8 +109,8 @@ def send_data(price, msg, status):
     gas_url = os.getenv("GAS_URL")
     discord_url = os.getenv("DISCORD_WEBHOOK_URL")
     if discord_url:
-        color = 16711680 if "🚨" in msg or "⚠️" in msg else 3066993
-        payload = {"embeds": [{"title": "📊 実需・社長インサイト戦略", "description": f"{msg}\n**Price:** {price:.3f}", "color": color}]}
+        color = 16711680 if "🚨" in msg or "🧪" in msg else 3066993
+        payload = {"embeds": [{"title": "📊 実需・社長インサイト戦略", "description": f"{msg}", "color": color}]}
         requests.post(discord_url, json=payload)
     if gas_url:
         data = {"date": datetime.now(timezone(timedelta(hours=9))).strftime("%Y/%m/%d %H:%M"), "strategy": "インサイト連携", "price": price, "status": status}
