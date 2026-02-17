@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # 設定エリア
-FORCE_TEST_MODE = True  # テスト時はTrue、本番運用時はFalseにしてください
+FORCE_TEST_MODE = True  # テスト時はTrue、本番運用時はFalse
 # ==========================================
 
 def get_demand_insight(dt):
@@ -31,17 +31,16 @@ def is_gotobi(dt):
     return False
 
 def get_technicals():
-    """ボリンジャーバンドの取得"""
+    """ボリンジャーバンドの計算（内部ロジック用）"""
     try:
         df = yf.Ticker("USDJPY=X").history(period="1d", interval="5m")
-        if len(df) < 20: return None, None, None
+        if len(df) < 20: return None, None
         sma = df['Close'].rolling(window=20).mean()
         std = df['Close'].rolling(window=20).std()
         price = df['Close'].iloc[-1]
         lower = sma.iloc[-1] - (2 * std.iloc[-1])
-        upper = sma.iloc[-1] + (2 * std.iloc[-1])
-        return price, lower, upper
-    except: return None, None, None
+        return price, lower
+    except: return None, None
 
 def run_strategy():
     jst = timezone(timedelta(hours=9))
@@ -51,16 +50,16 @@ def run_strategy():
     if not is_gotobi(now) and not FORCE_TEST_MODE:
         return 
 
-    price, bb_lower, bb_upper = get_technicals()
+    price, bb_lower = get_technicals()
     if price is None: return
 
     insight = get_demand_insight(now)
     msg, status = "", "監視中"
 
-    # --- 配信ロジック ---
+    # --- 配信ロジック（表示項目を最小化） ---
 
     if FORCE_TEST_MODE:
-        msg = f"🧪【テスト配信】\n判定: {insight}\n現在値: {price:.3f}円\nBB(-2σ): {bb_lower:.3f}"
+        msg = f"🧪【テスト配信】\n判定: {insight}\n現在値: {price:.3f}円"
         status = "テスト成功"
 
     elif "08:00" <= current_time <= "08:30":
@@ -69,11 +68,11 @@ def run_strategy():
 
     elif "07:00" <= current_time < "08:00":
         if price <= bb_lower:
-            msg = f"🚩【条件合致】押し目買い好機（BB-2σ到達）\n需給: {insight}"
+            msg = f"🚩【条件合致】押し目買い実行\n需給: {insight}"
             status = "ロング実行"
 
     elif "09:50" <= current_time <= "10:10":
-        msg = "🚨【全決済】9:55仲値公示前の撤退規律（流動性の真空を回避）"
+        msg = "🚨【全決済】仲値公示前の撤退"
         status = "ポジション解消"
 
     if msg: send_data(price, msg, status)
@@ -83,10 +82,10 @@ def send_data(price, msg, status):
     discord_url = os.getenv("DISCORD_WEBHOOK_URL")
     if discord_url:
         color = 3066993 if "📅" in msg else 16711680 if "🚨" in msg else 3447003
-        payload = {"embeds": [{"title": "📊 実需需給トレード・システム", "description": msg, "color": color}]}
+        payload = {"embeds": [{"title": "📊 Gotobi Bot", "description": msg, "color": color}]}
         requests.post(discord_url, json=payload)
     if gas_url:
-        data = {"date": datetime.now(timezone(timedelta(hours=9))).strftime("%Y/%m/%d %H:%M"), "strategy": "安定実需モデル", "price": price, "status": status}
+        data = {"date": datetime.now(timezone(timedelta(hours=9))).strftime("%Y/%m/%d %H:%M"), "strategy": "実需モデル", "price": price, "status": status}
         requests.post(gas_url, json=data)
 
 if __name__ == "__main__":
