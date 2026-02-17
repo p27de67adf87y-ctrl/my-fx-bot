@@ -6,13 +6,12 @@ from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # 設定エリア
-FORCE_TEST_MODE = True  # 今すぐテスト配信を確認するには True
+FORCE_TEST_MODE = True  # テスト時はTrue、本番運用時はFalseにしてください
 # ==========================================
 
 def get_demand_insight(dt):
-    """日付と曜日から、実需の強さを判定（マンデー・ルール対応）"""
+    """日付と曜日から実需の強さを判定"""
     day, weekday = dt.day, dt.weekday()
-    # 月曜日の振替判定（15日や5日が土日の場合）
     if weekday == 0:
         sun, sat = dt - timedelta(days=1), dt - timedelta(days=2)
         if sun.day % 5 == 0 or sat.day % 5 == 0:
@@ -26,7 +25,7 @@ def is_gotobi(dt):
     """ゴトー日判定"""
     day, weekday = dt.day, dt.weekday()
     if day % 5 == 0 and weekday < 5: return True
-    if weekday == 0: # 月曜日の振替判定
+    if weekday == 0:
         sun, sat = dt - timedelta(days=1), dt - timedelta(days=2)
         if sun.day % 5 == 0 or sat.day % 5 == 0: return True
     return False
@@ -49,7 +48,6 @@ def run_strategy():
     now = datetime.now(jst)
     current_time = now.strftime("%H:%M")
     
-    # 1. ゴトー日以外は沈黙（通常日は何もしない）
     if not is_gotobi(now) and not FORCE_TEST_MODE:
         return 
 
@@ -61,23 +59,19 @@ def run_strategy():
 
     # --- 配信ロジック ---
 
-    # テストモード：即座に現状を報告
     if FORCE_TEST_MODE:
-        msg = f"🧪【安定稼働テスト】\n判定: {insight}\n現在値: {price:.3f}円\nBB(-2σ): {bb_lower:.3f}\n\n※外部依存を排除したクリーンな状態で起動中。"
+        msg = f"🧪【テスト配信】\n判定: {insight}\n現在値: {price:.3f}円\nBB(-2σ): {bb_lower:.3f}"
         status = "テスト成功"
 
-    # 本番運用：朝の報告 (08:00 - 08:30)
     elif "08:00" <= current_time <= "08:30":
-        msg = f"📅 【ゴト日・朝の監視レポート】\n需給: {insight}\n現在値: {price:.3f}円\n※09:55の仲値に向けた時間軸の規律を適用します。"
+        msg = f"📅 【ゴト日・朝の監視レポート】\n需給: {insight}\n現在値: {price:.3f}円"
         status = "監視開始"
 
-    # 本番運用：押し目判定 (07:00台)
     elif "07:00" <= current_time < "08:00":
         if price <= bb_lower:
             msg = f"🚩【条件合致】押し目買い好機（BB-2σ到達）\n需給: {insight}"
             status = "ロング実行"
 
-    # 本番運用：決済規律 (09:50)
     elif "09:50" <= current_time <= "10:10":
         msg = "🚨【全決済】9:55仲値公示前の撤退規律（流動性の真空を回避）"
         status = "ポジション解消"
