@@ -7,32 +7,44 @@ from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # 設定エリア
-FORCE_TEST_MODE = True  # ← これを True にして保存すれば、今すぐ届きます！
+FORCE_TEST_MODE = True  # テスト時はTrue、本番はFalse
 # ==========================================
 
 def get_kobayashi_sentiment():
-    """JFX公式サイトから小林社長の目線をスクレイピング"""
-    url = "https://www.jfx.co.jp/category/market/market_shot/"
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-        res = requests.get(url, headers=headers, timeout=15)
-        res.raise_for_status()
-        
-        soup = BeautifulSoup(res.text, 'html.parser')
-        # 最新の記事リストを取得
-        latest_post = soup.select_one('.market_shot_list li')
-        if not latest_post:
-            raise ValueError("記事リストが見つかりません。")
+    """JFX公式サイトからインサイトを安全に取得"""
+    # 候補となるURLを複数設定（404回避のため）
+    urls = [
+        "https://www.jfx.co.jp/category/market/",              # 一覧ページ（推奨）
+        "https://www.jfx.co.jp/category/market/market_shot/"  # 個別カテゴリ
+    ]
+    
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+    
+    last_error = ""
+    for url in urls:
+        try:
+            res = requests.get(url, headers=headers, timeout=15)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, 'html.parser')
+                # 記事タイトルやリストを取得（サイト構造に合わせ柔軟に検索）
+                # 記事一覧の中から最初の項目を取得
+                latest_post = soup.select_one('.market_shot_list li, .post_item, article') 
+                
+                if latest_post:
+                    text = latest_post.text
+                    if "買い" in text or "押し目" in text:
+                        return 1.2, "🐂【社長インサイト】強気：買い方針"
+                    elif "売り" in text or "戻り" in text:
+                        return 0.8, "🐻【社長インサイト】弱気：売り方針"
+                    return 1.0, "⚖️【社長インサイト】中立：様子見"
             
-        text = latest_post.text
-        if "買い" in text or "押し目" in text:
-            return 1.2, "🐂【社長インサイト】強気：買い方針"
-        elif "売り" in text or "戻り" in text:
-            return 0.8, "🐻【社長インサイト】弱気：売り方針"
-        return 1.0, "⚖️【社長インサイト】中立：様子見"
-        
-    except Exception as e:
-        return None, f"🚨【要メンテナンス】インサイト取得失敗\n理由: {str(e)}"
+            last_error = f"{res.status_code} {res.reason} at {url}"
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    # すべてのURLで失敗した場合
+    return None, f"🚨【要メンテナンス】URLエラー\n原因: {last_error}\n※JFXのサイト構成が変わった可能性があります。"
 
 def get_demand_insight(dt):
     day, weekday = dt.day, dt.weekday()
@@ -69,7 +81,6 @@ def run_strategy():
     now = datetime.now(jst)
     current_time = now.strftime("%H:%M")
     
-    # テストモード以外で通常日の場合は終了
     if not is_gotobi(now) and not FORCE_TEST_MODE:
         return 
 
@@ -80,25 +91,14 @@ def run_strategy():
     demand_insight = get_demand_insight(now)
     msg, status = "", ""
 
-    # --- 配信ロジック ---
-
-    # テストモード時は最優先で配信メッセージを作成
+    # テストモード時は即座に配信
     if FORCE_TEST_MODE:
-        msg = f"🧪【テスト配信】現在の判定状況\n需給: {demand_insight}\n{sentiment_msg}\n現在値: {price:.3f}円\nBB(-2σ): {bb_lower:.3f}"
+        msg = f"🧪【テスト配信】\n需給: {demand_insight}\n{sentiment_msg}\n現在値: {price:.3f}円"
         status = "テスト実行"
-
-    # 通常のゴトー日タイムライン（FORCE_TEST_MODEがFalseの時に機能）
+    # 通常のゴトー日タイムライン
     elif "08:00" <= current_time <= "08:30":
         msg = f"📅 【ゴト日監視レポート】\n需給: {demand_insight}\n{sentiment_msg}\n現在値: {price:.3f}円"
         status = "監視開始"
-    elif "07:00" <= current_time < "08:00":
-        threshold = bb_lower * (1.0005 if (sentiment_score or 1.0) > 1.0 else 1.0)
-        if price <= threshold:
-            msg = f"🚩【条件合致】押し目買い実行\n{sentiment_msg}"
-            status = "ロング実行"
-        else:
-            msg = f"⚖️【待機】条件不一致\n{sentiment_msg}"
-            status = "見送り"
     elif "09:50" <= current_time <= "10:10":
         msg = "🚨【全決済】9:55公示直前の撤退規律"
         status = "ポジション解消"
@@ -110,7 +110,7 @@ def send_data(price, msg, status):
     discord_url = os.getenv("DISCORD_WEBHOOK_URL")
     if discord_url:
         color = 16711680 if "🚨" in msg or "🧪" in msg else 3066993
-        payload = {"embeds": [{"title": "📊 実需・社長インサイト戦略", "description": f"{msg}", "color": color}]}
+        payload = {"embeds": [{"title": "📊 実需・社長インサイト戦略", "description": msg, "color": color}]}
         requests.post(discord_url, json=payload)
     if gas_url:
         data = {"date": datetime.now(timezone(timedelta(hours=9))).strftime("%Y/%m/%d %H:%M"), "strategy": "インサイト連携", "price": price, "status": status}
