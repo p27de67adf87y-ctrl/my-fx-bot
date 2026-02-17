@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # 設定エリア
-FORCE_TEST_MODE = True  # テスト時はTrue、本番運用時はFalse
+FORCE_TEST_MODE = False  # テスト時はTrue、本番運用時はFalse
 # ==========================================
 
 def get_demand_insight(dt):
