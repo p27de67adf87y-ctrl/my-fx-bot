@@ -10,16 +10,14 @@ FORCE_TEST_MODE = False
 # ==========================================
 
 def get_demand_insight(dt):
-    """日付と曜日から実需の強さを判定"""
+    """日付から実需の強さを判定"""
     day, weekday = dt.day, dt.weekday()
     if weekday == 0:
         sun, sat = dt - timedelta(days=1), dt - timedelta(days=2)
         if sun.day % 5 == 0 or sat.day % 5 == 0:
             return "🔥【特強気】週末分が凝縮（マンデー・ルール適用日）"
-    
-    if day == 5: return "🐂【強気】5日の輸入企業決済（ドル買い優勢）"
-    if day == 30: return "🐻【警戒】末日の輸出企業決済（ドル売り交錯）"
-    return "⚖️【中立】通常のゴト日実需（仲値に向けた買い）"
+    if day % 5 == 0: return "🐂【強気】ゴト日のドル買い需要"
+    return "⚖️【中立】通常の実需（仲値に向けた動き）"
 
 def is_gotobi(dt):
     """ゴトー日判定ロジック"""
@@ -33,6 +31,7 @@ def is_gotobi(dt):
 def get_technicals():
     """ボリンジャーバンドの計算（期間10）"""
     try:
+        # スプレッドが落ち着いた正確なレートを取得するため直近の5分足を使用
         df = yf.Ticker("USDJPY=X").history(period="1d", interval="5m")
         if len(df) < 10: return None, None
         sma = df['Close'].rolling(window=10).mean()
@@ -57,20 +56,27 @@ def run_strategy():
     msg, status = "", "監視中"
 
     if FORCE_TEST_MODE:
-        msg = f"🧪【テスト配信】\n判定: {insight}\n現在値: {price:.3f}円\n※損切り設定（-20pips）を忘れずに！"
+        msg = f"🧪【テスト配信】\n判定: {insight}\n現在値: {price:.3f}円\n※7:45スタート設定の動作確認です。"
         status = "テスト成功"
 
-    elif "08:00" <= current_time <= "08:30":
-        msg = f"📅 【ゴト日・朝の監視レポート】\n需給: {insight}\n現在値: {price:.3f}円\n※損切り（-20pips）の設定を忘れずに！"
+    # 1. 07:45 〜 08:00: 最初の監視レポート
+    elif "07:45" <= current_time < "08:00":
+        msg = f"📅 【7:45 監視開始】\n需給: {insight}\n現在値: {price:.3f}円\nスプレッド安定後の監視を開始しました。"
         status = "監視開始"
-
-    elif "07:00" <= current_time < "08:00":
+        # もしこの時点で-2σを下回っていればエントリー指示も兼ねる
         if price <= bb_lower:
-            msg = f"🚩【条件合致】押し目買い実行\n需給: {insight}\n⚠️ 注文と同時に「-20pips」の損切りをセットしてください！"
+            msg += "\n\n🚩【条件合致】現在安値圏です！\n10枚ロング ＋ 損切り(-20pips)推奨"
             status = "ロング実行"
 
-    elif "09:50" <= current_time <= "10:10":
-        msg = "🚨【全決済】仲値公示前の撤退規律"
+    # 2. 08:00 〜 09:30: 押し目買いの監視（メイン）
+    elif "08:00" <= current_time < "09:30":
+        if price <= bb_lower:
+            msg = f"🚩【条件合致】押し目買い実行\n現在値: {price:.3f}円\n⚠️ 10枚注文 ＋ 損切り(-20pips)をセット！"
+            status = "ロング実行"
+
+    # 3. 09:50 〜 11:00: 決済アラート（遅延対策済み）
+    elif "09:50" <= current_time <= "11:00":
+        msg = "🚨【全決済】仲値公示後のステータス更新\n本日のトレードを終了し、結果を記録します。"
         status = "ポジション解消"
 
     if msg: send_data(price, msg, status)
@@ -80,7 +86,7 @@ def send_data(price, msg, status):
     discord_url = os.getenv("DISCORD_WEBHOOK_URL")
     if discord_url:
         color = 3066993 if "📅" in msg else 16711680 if "🚨" in msg or "⚠️" in msg else 3447003
-        payload = {"embeds": [{"title": "📊 Gotobi Bot (Optimized)", "description": msg, "color": color}]}
+        payload = {"embeds": [{"title": "📊 Gotobi Bot (7:45 Start)", "description": msg, "color": color}]}
         requests.post(discord_url, json=payload)
     if gas_url:
         data = {
