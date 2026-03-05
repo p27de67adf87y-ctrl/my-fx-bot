@@ -64,4 +64,47 @@ def run_strategy():
 
     # 1. 監視開始：07:45 〜 08:10 の間に起動した場合
     elif "07:45" <= current_time <= "08:10":
-        msg = f"📅 【監視開始レポート】\n需給: {insight
+        msg = f"📅 【監視開始レポート】\n需給: {insight}\n現在値: {price:.3f}円\nスプレッド安定後の監視を開始しました。"
+        status = "監視開始"
+        # この時点で安値ならエントリー指示
+        if price <= bb_lower:
+            msg += "\n\n🚩【条件合致】現在安値圏です！\n10枚ロング ＋ 損切り(-20pips)推奨"
+            status = "ロング実行"
+
+    # 2. 押し目監視：08:11 〜 09:40 の間（条件が合った時だけ赤旗を出す）
+    elif "08:11" <= current_time <= "09:40":
+        if price <= bb_lower:
+            msg = f"🚩【条件合致】押し目買い実行\n現在値: {price:.3f}円\n⚠️ 10枚注文 ＋ 損切り(-20pips)をセット！"
+            status = "ロング実行"
+
+    # 3. 決済：09:45 〜 11:30 の間に起動した場合
+    elif "09:45" <= current_time <= "11:30":
+        msg = "🚨【全決済】仲値公示後のステータス更新\n本日のトレード時間を終了しました。お疲れ様でした！"
+        status = "ポジション解消"
+
+    # メッセージがある場合のみ送信
+    if msg:
+        send_data(price, msg, status)
+
+def send_data(price, msg, status):
+    gas_url = os.getenv("GAS_URL")
+    discord_url = os.getenv("DISCORD_WEBHOOK_URL")
+    
+    # Discord送信
+    if discord_url:
+        color = 3066993 if "📅" in msg else 16711680 if "🚨" in msg or "🚩" in msg else 3447003
+        payload = {"embeds": [{"title": "📊 Gotobi Bot", "description": msg, "color": color}]}
+        requests.post(discord_url, json=payload)
+    
+    # Google Apps Script(GAS)送信
+    if gas_url:
+        data = {
+            "date": datetime.now(timezone(timedelta(hours=9))).strftime("%Y/%m/%d %H:%M"),
+            "strategy": "実需・期間10モデル",
+            "price": price,
+            "status": status
+        }
+        requests.post(gas_url, json=data)
+
+if __name__ == "__main__":
+    run_strategy()
