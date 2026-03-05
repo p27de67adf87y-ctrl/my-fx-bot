@@ -6,13 +6,13 @@ from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # 設定エリア
-FORCE_TEST_MODE = False  
+FORCE_TEST_MODE = False  # テスト時のみTrueにする
 # ==========================================
 
 def get_demand_insight(dt):
     """日付から実需の強さを判定"""
     day, weekday = dt.day, dt.weekday()
-    if weekday == 0:
+    if weekday == 0: # 月曜日の場合、土日の分も考慮
         sun, sat = dt - timedelta(days=1), dt - timedelta(days=2)
         if sun.day % 5 == 0 or sat.day % 5 == 0:
             return "🔥【特強気】週末分が凝縮（マンデー・ルール適用日）"
@@ -31,7 +31,7 @@ def is_gotobi(dt):
 def get_technicals():
     """ボリンジャーバンドの計算（期間10）"""
     try:
-        # スプレッドが落ち着いた正確なレートを取得するため直近の5分足を使用
+        # スプレッドが落ち着いたレートを取得するため5分足を使用
         df = yf.Ticker("USDJPY=X").history(period="1d", interval="5m")
         if len(df) < 10: return None, None
         sma = df['Close'].rolling(window=10).mean()
@@ -46,6 +46,7 @@ def run_strategy():
     now = datetime.now(jst)
     current_time = now.strftime("%H:%M")
     
+    # ゴトー日でない、かつテストモードでない場合は終了
     if not is_gotobi(now) and not FORCE_TEST_MODE:
         return 
 
@@ -55,47 +56,12 @@ def run_strategy():
     insight = get_demand_insight(now)
     msg, status = "", "監視中"
 
+    # --- 判定ロジック（遅延対策・幅を持たせた判定） ---
+
     if FORCE_TEST_MODE:
-        msg = f"🧪【テスト配信】\n判定: {insight}\n現在値: {price:.3f}円\n※7:45スタート設定の動作確認です。"
+        msg = f"🧪【テスト配信】\n判定: {insight}\n現在値: {price:.3f}円\n※動作確認用メッセージです。"
         status = "テスト成功"
 
-    # 1. 07:45 〜 08:00: 最初の監視レポート
-    elif "07:45" <= current_time < "08:00":
-        msg = f"📅 【7:45 監視開始】\n需給: {insight}\n現在値: {price:.3f}円\nスプレッド安定後の監視を開始しました。"
-        status = "監視開始"
-        # もしこの時点で-2σを下回っていればエントリー指示も兼ねる
-        if price <= bb_lower:
-            msg += "\n\n🚩【条件合致】現在安値圏です！\n10枚ロング ＋ 損切り(-20pips)推奨"
-            status = "ロング実行"
-
-    # 2. 08:00 〜 09:30: 押し目買いの監視（メイン）
-    elif "08:00" <= current_time < "09:30":
-        if price <= bb_lower:
-            msg = f"🚩【条件合致】押し目買い実行\n現在値: {price:.3f}円\n⚠️ 10枚注文 ＋ 損切り(-20pips)をセット！"
-            status = "ロング実行"
-
-    # 3. 09:50 〜 11:00: 決済アラート（遅延対策済み）
-    elif "09:50" <= current_time <= "11:00":
-        msg = "🚨【全決済】仲値公示後のステータス更新\n本日のトレードを終了し、結果を記録します。"
-        status = "ポジション解消"
-
-    if msg: send_data(price, msg, status)
-
-def send_data(price, msg, status):
-    gas_url = os.getenv("GAS_URL")
-    discord_url = os.getenv("DISCORD_WEBHOOK_URL")
-    if discord_url:
-        color = 3066993 if "📅" in msg else 16711680 if "🚨" in msg or "⚠️" in msg else 3447003
-        payload = {"embeds": [{"title": "📊 Gotobi Bot (7:45 Start)", "description": msg, "color": color}]}
-        requests.post(discord_url, json=payload)
-    if gas_url:
-        data = {
-            "date": datetime.now(timezone(timedelta(hours=9))).strftime("%Y/%m/%d %H:%M"),
-            "strategy": "実需・期間10モデル",
-            "price": price,
-            "status": status
-        }
-        requests.post(gas_url, json=data)
-
-if __name__ == "__main__":
-    run_strategy()
+    # 1. 監視開始：07:45 〜 08:10 の間に起動した場合
+    elif "07:45" <= current_time <= "08:10":
+        msg = f"📅 【監視開始レポート】\n需給: {insight
